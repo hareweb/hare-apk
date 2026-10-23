@@ -1,0 +1,971 @@
+name: Hare Native Android APK Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Hare APK Derle (hare.ilmilutuf.com.tr)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Depoyu Çek (Checkout)
+        uses: actions/checkout@v4
+
+      - name: JDK 17 Kurulumu
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Hare Proje Dosyalarını ve Site Logosunu Otomatik Oluştur
+        run: |
+          pip install requests beautifulsoup4 pillow cairosvg || pip install requests beautifulsoup4 pillow
+          python3 - << 'PYEOF'
+          import os
+          import re
+          from io import BytesIO
+          from urllib.parse import urljoin
+          import requests
+          from bs4 import BeautifulSoup
+          from PIL import Image, ImageDraw
+
+          # 1. Create directory structure
+          os.makedirs("app/src/main/java/tr/com/ilmilutuf/hare", exist_ok=True)
+          os.makedirs("app/src/main/res/drawable-nodpi", exist_ok=True)
+
+          # 2. Write settings.gradle.kts
+          with open("settings.gradle.kts", "w", encoding="utf-8") as f:
+              f.write("""pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "Hare"
+          include(":app")
+          """)
+
+          # 3. Write root build.gradle.kts
+          with open("build.gradle.kts", "w", encoding="utf-8") as f:
+              f.write("""plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          """)
+
+          # 4. Write gradle.properties
+          with open("gradle.properties", "w", encoding="utf-8") as f:
+              f.write("""org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          kotlin.code.style=official
+          """)
+
+          # 5. Write app/proguard-rules.pro
+          with open("app/proguard-rules.pro", "w", encoding="utf-8") as f:
+              f.write("""-keepattributes *Annotation*
+          -keepattributes JavascriptInterface
+          -keepclassmembers class * {
+              @android.webkit.JavascriptInterface <methods>;
+          }
+          -keep class tr.com.ilmilutuf.hare.MainActivity$HareNativeBridge { *; }
+          -dontwarn android.webkit.**
+          """)
+
+          # 6. Write app/build.gradle.kts
+          with open("app/build.gradle.kts", "w", encoding="utf-8") as f:
+              f.write("""import java.io.File
+
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "tr.com.ilmilutuf.hare"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "tr.com.ilmilutuf.hare"
+                  minSdk = 24
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0.0"
+              }
+
+              signingConfigs {
+                  create("release") {
+                      val keystoreFile = File(projectDir, "release-key.jks")
+                      if (keystoreFile.exists()) {
+                          storeFile = keystoreFile
+                          storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "HareIlmiLutuf2026"
+                          keyAlias = System.getenv("KEY_ALIAS") ?: "hare_key"
+                          keyPassword = System.getenv("KEY_PASSWORD") ?: "HareIlmiLutuf2026"
+                      }
+                  }
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                      isShrinkResources = false
+                      signingConfig = signingConfigs.getByName("release")
+                      proguardFiles(
+                          getDefaultProguardFile("proguard-android-optimize.txt"),
+                          "proguard-rules.pro"
+                      )
+                  }
+                  debug {
+                      isDebuggable = true
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.appcompat:appcompat:1.7.0")
+              implementation("com.google.android.material:material:1.12.0")
+              implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+              implementation("androidx.webkit:webkit:1.11.0")
+          }
+          """)
+
+          # 7. Write app/src/main/AndroidManifest.xml (All Device Permissions + Hare Identity)
+          with open("app/src/main/AndroidManifest.xml", "w", encoding="utf-8") as f:
+              f.write("""<?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools"
+              package="tr.com.ilmilutuf.hare">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+              <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+              <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+              <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+              <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" tools:ignore="ScopedStorage" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+              <uses-permission android:name="android.permission.BLUETOOTH" />
+              <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+              <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+              <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+              <uses-feature android:name="android.hardware.camera" android:required="false" />
+              <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+              <uses-feature android:name="android.hardware.microphone" android:required="false" />
+              <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+              <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+
+              <application
+                  android:allowBackup="true"
+                  android:hardwareAccelerated="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:label="Hare"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar"
+                  android:usesCleartextTraffic="false">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+
+                      <intent-filter android:autoVerify="true">
+                          <action android:name="android.intent.action.VIEW" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                          <category android:name="android.intent.category.BROWSABLE" />
+                          <data
+                              android:scheme="https"
+                              android:host="hare.ilmilutuf.com.tr" />
+                      </intent-filter>
+                  </activity>
+              </application>
+
+          </manifest>
+          """)
+
+          # 8. Write MainActivity.kt
+          with open("app/src/main/java/tr/com/ilmilutuf/hare/MainActivity.kt", "w", encoding="utf-8") as f:
+              f.write("""package tr.com.ilmilutuf.hare
+
+          import android.Manifest
+          import android.annotation.SuppressLint
+          import android.app.DownloadManager
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.content.Context
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.graphics.Bitmap
+          import android.graphics.Color
+          import android.net.ConnectivityManager
+          import android.net.Network
+          import android.net.NetworkCapabilities
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.Environment
+          import android.os.VibrationEffect
+          import android.os.Vibrator
+          import android.provider.MediaStore
+          import android.view.Gravity
+          import android.view.View
+          import android.view.ViewGroup
+          import android.webkit.CookieManager
+          import android.webkit.GeolocationPermissions
+          import android.webkit.JavascriptInterface
+          import android.webkit.PermissionRequest
+          import android.webkit.URLUtil
+          import android.webkit.ValueCallback
+          import android.webkit.WebChromeClient
+          import android.webkit.WebResourceError
+          import android.webkit.WebResourceRequest
+          import android.webkit.WebSettings
+          import android.webkit.WebView
+          import android.webkit.WebViewClient
+          import android.widget.Button
+          import android.widget.FrameLayout
+          import android.widget.ImageView
+          import android.widget.LinearLayout
+          import android.widget.ProgressBar
+          import android.widget.TextView
+          import android.widget.Toast
+          import androidx.activity.OnBackPressedCallback
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.core.app.NotificationCompat
+          import androidx.core.content.ContextCompat
+          import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+
+          class MainActivity : AppCompatActivity() {
+
+              private lateinit var rootContainer: FrameLayout
+              private lateinit var webView: WebView
+              private lateinit var swipeRefreshLayout: SwipeRefreshLayout
+              private lateinit var progressBar: ProgressBar
+              private lateinit var splashLayout: LinearLayout
+              private lateinit var errorLayout: LinearLayout
+              private lateinit var fullScreenContainer: FrameLayout
+
+              private var customView: View? = null
+              private var customViewCallback: WebChromeClient.CustomViewCallback? = null
+              private var filePathCallback: ValueCallback<Array<Uri>>? = null
+              private var pendingWebPermissionRequest: PermissionRequest? = null
+
+              private val targetUrl = "https://hare.ilmilutuf.com.tr"
+              private val allowedHost = "hare.ilmilutuf.com.tr"
+              private val notificationChannelId = "hare_native_notifications"
+
+              private val runtimePermissionsLauncher = registerForActivityResult(
+                  ActivityResultContracts.RequestMultiplePermissions()
+              ) { permissions ->
+                  pendingWebPermissionRequest?.let { request ->
+                      val canGrant = request.resources.all { res ->
+                          when (res) {
+                              PermissionRequest.RESOURCE_VIDEO_CAPTURE ->
+                                  permissions[Manifest.permission.CAMERA] == true || hasPermission(Manifest.permission.CAMERA)
+                              PermissionRequest.RESOURCE_AUDIO_CAPTURE ->
+                                  permissions[Manifest.permission.RECORD_AUDIO] == true || hasPermission(Manifest.permission.RECORD_AUDIO)
+                              else -> true
+                          }
+                      }
+                      if (canGrant) {
+                          request.grant(request.resources)
+                      } else {
+                          request.deny()
+                      }
+                      pendingWebPermissionRequest = null
+                  }
+              }
+
+              private val fileChooserLauncher = registerForActivityResult(
+                  ActivityResultContracts.StartActivityForResult()
+              ) { result ->
+                  val results: Array<Uri>? = WebChromeClient.FileChooserParams.parseResult(
+                      result.resultCode,
+                      result.data
+                  )
+                  filePathCallback?.onReceiveValue(results)
+                  filePathCallback = null
+              }
+
+              @SuppressLint("SetJavaScriptEnabled")
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  createNotificationChannel()
+                  requestAllDevicePermissions()
+
+                  rootContainer = FrameLayout(this).apply {
+                      layoutParams = ViewGroup.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                  }
+
+                  swipeRefreshLayout = SwipeRefreshLayout(this).apply {
+                      layoutParams = FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                      setColorSchemeColors(Color.parseColor("#1E3A8A"), Color.parseColor("#0D9488"))
+                  }
+
+                  webView = WebView(this).apply {
+                      layoutParams = ViewGroup.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                  }
+
+                  progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                      layoutParams = FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          8
+                      ).apply {
+                          gravity = Gravity.TOP
+                      }
+                      max = 100
+                      visibility = View.GONE
+                  }
+
+                  splashLayout = createNativeSplashView()
+                  errorLayout = createOfflineView()
+                  fullScreenContainer = FrameLayout(this).apply {
+                      layoutParams = FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+                      setBackgroundColor(Color.BLACK)
+                      visibility = View.GONE
+                  }
+
+                  swipeRefreshLayout.addView(webView)
+                  rootContainer.addView(swipeRefreshLayout)
+                  rootContainer.addView(progressBar)
+                  rootContainer.addView(errorLayout)
+                  rootContainer.addView(splashLayout)
+                  rootContainer.addView(fullScreenContainer)
+                  setContentView(rootContainer)
+
+                  configureNativeEngine()
+                  setupBackNavigation()
+                  registerNetworkCallback()
+
+                  swipeRefreshLayout.setOnRefreshListener {
+                      if (isNetworkAvailable()) {
+                          errorLayout.visibility = View.GONE
+                          webView.reload()
+                      } else {
+                          swipeRefreshLayout.isRefreshing = false
+                          showOfflineScreen()
+                      }
+                  }
+
+                  val initialUrl = intent?.dataString ?: targetUrl
+                  if (isNetworkAvailable()) {
+                      webView.loadUrl(initialUrl)
+                  } else {
+                      splashLayout.visibility = View.GONE
+                      showOfflineScreen()
+                  }
+              }
+
+              private fun requestAllDevicePermissions() {
+                  val needed = mutableListOf(
+                      Manifest.permission.CAMERA,
+                      Manifest.permission.RECORD_AUDIO,
+                      Manifest.permission.ACCESS_FINE_LOCATION,
+                      Manifest.permission.ACCESS_COARSE_LOCATION
+                  )
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                      needed.add(Manifest.permission.POST_NOTIFICATIONS)
+                      needed.add(Manifest.permission.READ_MEDIA_IMAGES)
+                      needed.add(Manifest.permission.READ_MEDIA_VIDEO)
+                      needed.add(Manifest.permission.READ_MEDIA_AUDIO)
+                  } else {
+                      needed.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+                  }
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                      needed.add(Manifest.permission.BLUETOOTH_CONNECT)
+                      needed.add(Manifest.permission.BLUETOOTH_SCAN)
+                  }
+
+                  val toRequest = needed.filter { !hasPermission(it) }
+                  if (toRequest.isNotEmpty()) {
+                      runtimePermissionsLauncher.launch(toRequest.toTypedArray())
+                  }
+              }
+
+              private fun hasPermission(permission: String): Boolean {
+                  return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+              }
+
+              @SuppressLint("SetJavaScriptEnabled")
+              private fun configureNativeEngine() {
+                  CookieManager.getInstance().apply {
+                      setAcceptCookie(true)
+                      setAcceptThirdPartyCookies(webView, true)
+                  }
+
+                  webView.addJavascriptInterface(HareNativeBridge(this), "HareNative")
+
+                  webView.settings.apply {
+                      javaScriptEnabled = true
+                      domStorageEnabled = true
+                      databaseEnabled = true
+                      setGeolocationEnabled(true)
+                      loadsImagesAutomatically = true
+                      mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                      cacheMode = WebSettings.LOAD_DEFAULT
+                      useWideViewPort = true
+                      loadWithOverviewMode = true
+                      setSupportZoom(false)
+                      builtInZoomControls = false
+                      displayZoomControls = false
+                      javaScriptCanOpenWindowsAutomatically = true
+                      mediaPlaybackRequiresUserGesture = false
+                      allowFileAccess = true
+                      allowContentAccess = true
+                      userAgentString = "$userAgentString HareNativeAndroid/1.0"
+                  }
+
+                  webView.webViewClient = object : WebViewClient() {
+                      override fun shouldOverrideUrlLoading(
+                          view: WebView?,
+                          request: WebResourceRequest?
+                      ): Boolean {
+                          val uri = request?.url ?: return false
+                          val scheme = uri.scheme ?: ""
+
+                          if (scheme in listOf("tel", "mailto", "whatsapp", "sms", "geo", "intent")) {
+                              return try {
+                                  startActivity(Intent(Intent.ACTION_VIEW, uri))
+                                  true
+                              } catch (e: Exception) {
+                                  false
+                              }
+                          }
+
+                          val host = uri.host ?: ""
+                          return if (host.endsWith(allowedHost) || host.endsWith("ilmilutuf.com.tr")) {
+                              false
+                          } else {
+                              startActivity(Intent(Intent.ACTION_VIEW, uri))
+                              true
+                          }
+                      }
+
+                      override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                          super.onPageStarted(view, url, favicon)
+                          errorLayout.visibility = View.GONE
+                          progressBar.visibility = View.VISIBLE
+                      }
+
+                      override fun onPageFinished(view: WebView?, url: String?) {
+                          super.onPageFinished(view, url)
+                          swipeRefreshLayout.isRefreshing = false
+                          progressBar.visibility = View.GONE
+                          splashLayout.animate().alpha(0f).setDuration(250).withEndAction {
+                              splashLayout.visibility = View.GONE
+                          }.start()
+                          CookieManager.getInstance().flush()
+                      }
+
+                      override fun onReceivedError(
+                          view: WebView?,
+                          request: WebResourceRequest?,
+                          error: WebResourceError?
+                      ) {
+                          super.onReceivedError(view, request, error)
+                          if (request?.isForMainFrame == true) {
+                              swipeRefreshLayout.isRefreshing = false
+                              splashLayout.visibility = View.GONE
+                              showOfflineScreen()
+                          }
+                      }
+                  }
+
+                  webView.webChromeClient = object : WebChromeClient() {
+                      override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                          progressBar.progress = newProgress
+                          progressBar.visibility = if (newProgress == 100) View.GONE else View.VISIBLE
+                      }
+
+                      override fun onPermissionRequest(request: PermissionRequest?) {
+                          if (request == null) return
+                          val missing = mutableListOf<String>()
+                          for (res in request.resources) {
+                              if (res == PermissionRequest.RESOURCE_VIDEO_CAPTURE && !hasPermission(Manifest.permission.CAMERA)) {
+                                  missing.add(Manifest.permission.CAMERA)
+                              }
+                              if (res == PermissionRequest.RESOURCE_AUDIO_CAPTURE && !hasPermission(Manifest.permission.RECORD_AUDIO)) {
+                                  missing.add(Manifest.permission.RECORD_AUDIO)
+                              }
+                          }
+                          if (missing.isEmpty()) {
+                              request.grant(request.resources)
+                          } else {
+                              pendingWebPermissionRequest = request
+                              runtimePermissionsLauncher.launch(missing.toTypedArray())
+                          }
+                      }
+
+                      override fun onGeolocationPermissionsShowPrompt(
+                          origin: String?,
+                          callback: GeolocationPermissions.Callback?
+                      ) {
+                          if (hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) ||
+                              hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+                          ) {
+                              callback?.invoke(origin, true, false)
+                          } else {
+                              runtimePermissionsLauncher.launch(
+                                  arrayOf(
+                                      Manifest.permission.ACCESS_FINE_LOCATION,
+                                      Manifest.permission.ACCESS_COARSE_LOCATION
+                                  )
+                              )
+                              callback?.invoke(origin, true, false)
+                          }
+                      }
+
+                      override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                          if (customView != null) {
+                              callback?.onCustomViewHidden()
+                              return
+                          }
+                          customView = view
+                          customViewCallback = callback
+                          fullScreenContainer.addView(view)
+                          fullScreenContainer.visibility = View.VISIBLE
+                          swipeRefreshLayout.visibility = View.GONE
+                      }
+
+                      override fun onHideCustomView() {
+                          if (customView == null) return
+                          fullScreenContainer.removeView(customView)
+                          fullScreenContainer.visibility = View.GONE
+                          swipeRefreshLayout.visibility = View.VISIBLE
+                          customViewCallback?.onCustomViewHidden()
+                          customView = null
+                          customViewCallback = null
+                      }
+
+                      override fun onShowFileChooser(
+                          webView: WebView?,
+                          filePathCallback: ValueCallback<Array<Uri>>?,
+                          fileChooserParams: FileChooserParams?
+                      ): Boolean {
+                          this@MainActivity.filePathCallback?.onReceiveValue(null)
+                          this@MainActivity.filePathCallback = filePathCallback
+                          return try {
+                              val contentIntent = fileChooserParams?.createIntent() ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                                  addCategory(Intent.CATEGORY_OPENABLE)
+                                  type = "*/*"
+                              }
+                              val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                              val videoIntent = Intent(MediaStore.ACTION_VIDEO_CAPTURE)
+                              val chooserIntent = Intent(Intent.ACTION_CHOOSER).apply {
+                                  putExtra(Intent.EXTRA_INTENT, contentIntent)
+                                  putExtra(Intent.EXTRA_TITLE, "Hare — Dosya veya Kamera Seçin")
+                                  putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(cameraIntent, videoIntent))
+                              }
+                              fileChooserLauncher.launch(chooserIntent)
+                              true
+                          } catch (e: Exception) {
+                              this@MainActivity.filePathCallback = null
+                              false
+                          }
+                      }
+                  }
+
+                  webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+                      try {
+                          val request = DownloadManager.Request(Uri.parse(url)).apply {
+                              setMimeType(mimeType)
+                              val cookies = CookieManager.getInstance().getCookie(url)
+                              addRequestHeader("cookie", cookies)
+                              addRequestHeader("User-Agent", userAgent)
+                              setDescription("Hare üzerinden indiriliyor...")
+                              val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+                              setTitle(fileName)
+                              setNotificationVisibility(
+                                  DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                              )
+                              setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                          }
+                          val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                          dm.enqueue(request)
+                          Toast.makeText(applicationContext, "İndirme başlatıldı: $url", Toast.LENGTH_SHORT).show()
+                      } catch (e: Exception) {
+                          startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                      }
+                  }
+              }
+
+              private fun createNativeSplashView(): LinearLayout {
+                  return LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER
+                      setBackgroundColor(Color.parseColor("#0F172A"))
+                      layoutParams = FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+
+                      val logoImage = ImageView(this@MainActivity).apply {
+                          val resId = resources.getIdentifier("site_logo", "drawable", packageName)
+                          if (resId != 0) {
+                              setImageResource(resId)
+                          } else {
+                              val mipmapId = resources.getIdentifier("ic_launcher", "mipmap", packageName)
+                              if (mipmapId != 0) setImageResource(mipmapId)
+                          }
+                          layoutParams = LinearLayout.LayoutParams(240, 240).apply {
+                              bottomMargin = 32
+                          }
+                      }
+
+                      val titleView = TextView(this@MainActivity).apply {
+                          text = "Hare"
+                          textSize = 28f
+                          setTextColor(Color.WHITE)
+                          gravity = Gravity.CENTER
+                      }
+
+                      val spinner = ProgressBar(this@MainActivity).apply {
+                          layoutParams = LinearLayout.LayoutParams(96, 96).apply {
+                              topMargin = 48
+                          }
+                      }
+
+                      addView(logoImage)
+                      addView(titleView)
+                      addView(spinner)
+                  }
+              }
+
+              private fun createOfflineView(): LinearLayout {
+                  return LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      gravity = Gravity.CENTER
+                      setBackgroundColor(Color.WHITE)
+                      setPadding(64, 64, 64, 64)
+                      visibility = View.GONE
+                      layoutParams = FrameLayout.LayoutParams(
+                          ViewGroup.LayoutParams.MATCH_PARENT,
+                          ViewGroup.LayoutParams.MATCH_PARENT
+                      )
+
+                      val titleView = TextView(this@MainActivity).apply {
+                          text = "Bağlantı Kurulamadı"
+                          textSize = 22f
+                          setTextColor(Color.parseColor("#111827"))
+                          gravity = Gravity.CENTER
+                      }
+
+                      val messageView = TextView(this@MainActivity).apply {
+                          text = "Hare sunucusuna şu anda ulaşılamıyor. Lütfen internet bağlantınızı kontrol edip tekrar deneyin."
+                          textSize = 15f
+                          setTextColor(Color.parseColor("#4B5563"))
+                          gravity = Gravity.CENTER
+                          setPadding(0, 24, 0, 48)
+                      }
+
+                      val retryButton = Button(this@MainActivity).apply {
+                          text = "Tekrar Dene"
+                          setBackgroundColor(Color.parseColor("#1E3A8A"))
+                          setTextColor(Color.WHITE)
+                          setOnClickListener {
+                              if (isNetworkAvailable()) {
+                                  visibility = View.GONE
+                                  webView.reload()
+                              } else {
+                                  Toast.makeText(
+                                      this@MainActivity,
+                                      "İnternet bağlantısı halen yok",
+                                      Toast.LENGTH_SHORT
+                                  ).show()
+                              }
+                          }
+                      }
+
+                      addView(titleView)
+                      addView(messageView)
+                      addView(retryButton)
+                  }
+              }
+
+              private fun showOfflineScreen() {
+                  errorLayout.visibility = View.VISIBLE
+              }
+
+              private fun setupBackNavigation() {
+                  onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+                      override fun handleOnBackPressed() {
+                          when {
+                              customView != null -> webView.webChromeClient?.onHideCustomView()
+                              webView.canGoBack() -> webView.goBack()
+                              else -> {
+                                  isEnabled = false
+                                  onBackPressedDispatcher.onBackPressed()
+                              }
+                          }
+                      }
+                  })
+              }
+
+              private fun registerNetworkCallback() {
+                  val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                  cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+                      override fun onAvailable(network: Network) {
+                          runOnUiThread {
+                              if (errorLayout.visibility == View.VISIBLE) {
+                                  errorLayout.visibility = View.GONE
+                                  webView.reload()
+                              }
+                          }
+                      }
+                  })
+              }
+
+              private fun createNotificationChannel() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val channel = NotificationChannel(
+                          notificationChannelId,
+                          "Hare Bildirimleri",
+                          NotificationManager.IMPORTANCE_HIGH
+                      ).apply {
+                          description = "Hare uygulaması yerel bildirim kanalı"
+                      }
+                      val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                      nm.createNotificationChannel(channel)
+                  }
+              }
+
+              private fun isNetworkAvailable(): Boolean {
+                  val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                  val network = cm.activeNetwork ?: return false
+                  val capabilities = cm.getNetworkCapabilities(network) ?: return false
+                  return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+              }
+
+              inner class HareNativeBridge(private val context: Context) {
+                  @JavascriptInterface
+                  fun showToast(message: String) {
+                      Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                  }
+
+                  @JavascriptInterface
+                  fun vibrate(durationMs: Long) {
+                      val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          vibrator?.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
+                      } else {
+                          @Suppress("DEPRECATION")
+                          vibrator?.vibrate(durationMs)
+                      }
+                  }
+
+                  @JavascriptInterface
+                  fun shareContent(title: String, text: String, url: String) {
+                      val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                          type = "text/plain"
+                          putExtra(Intent.EXTRA_SUBJECT, title)
+                          putExtra(Intent.EXTRA_TEXT, "$text $url".trim())
+                      }
+                      context.startActivity(Intent.createChooser(sendIntent, title))
+                  }
+
+                  @JavascriptInterface
+                  fun showNativeNotification(title: String, message: String) {
+                      val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                      val iconRes = resources.getIdentifier("ic_launcher", "mipmap", packageName)
+                          .takeIf { it != 0 } ?: android.R.drawable.ic_dialog_info
+                      val notification = NotificationCompat.Builder(context, notificationChannelId)
+                          .setSmallIcon(iconRes)
+                          .setContentTitle(title)
+                          .setContentText(message)
+                          .setPriority(NotificationCompat.PRIORITY_HIGH)
+                          .setAutoCancel(true)
+                          .build()
+                      nm.notify((System.currentTimeMillis() % 10000).toInt(), notification)
+                  }
+
+                  @JavascriptInterface
+                  fun getDeviceInfo(): String {
+                      return "${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE})"
+                  }
+              }
+          }
+          """)
+
+          # 9. Fetch official logo from https://hare.ilmilutuf.com.tr and create mipmap icons
+          SITE_URL = "https://hare.ilmilutuf.com.tr"
+          HEADERS = {"User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126.0.0.0 Mobile Safari/537.36"}
+          MIPMAP_SIZES = {
+              "mipmap-mdpi": 48,
+              "mipmap-hdpi": 72,
+              "mipmap-xhdpi": 96,
+              "mipmap-xxhdpi": 144,
+              "mipmap-xxxhdpi": 192,
+          }
+
+          candidates = []
+          try:
+              resp = requests.get(SITE_URL, headers=HEADERS, timeout=15)
+              if resp.status_code == 200:
+                  soup = BeautifulSoup(resp.text, "html.parser")
+                  for link in soup.find_all("link"):
+                      rel = " ".join(link.get("rel", [])).lower()
+                      href = link.get("href")
+                      if href and any(k in rel for k in ["apple-touch-icon", "icon", "shortcut"]):
+                          candidates.append(urljoin(SITE_URL, href))
+                  for img in soup.find_all("img"):
+                      src = img.get("src") or img.get("data-src")
+                      alt = (img.get("alt") or "").lower()
+                      cls = " ".join(img.get("class", [])).lower()
+                      if src and any(k in src.lower() or k in alt or k in cls for k in ["logo", "hare", "brand", "icon"]):
+                          candidates.append(urljoin(SITE_URL, src))
+                  og_img = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "og:image"})
+                  if og_img and og_img.get("content"):
+                      candidates.append(urljoin(SITE_URL, og_img["content"]))
+          except Exception as e:
+              print("Site scan warning:", e)
+
+          for p in ["/apple-touch-icon.png", "/logo.png", "/assets/logo.png", "/img/logo.png", "/images/logo.png", "/favicon.png", "/favicon.ico"]:
+              candidates.append(urljoin(SITE_URL, p))
+
+          logo = None
+          best_area = 0
+          for url in candidates:
+              try:
+                  r = requests.get(url, headers=HEADERS, timeout=10)
+                  if r.status_code != 200 or not r.content:
+                      continue
+                  raw = r.content
+                  if url.lower().endswith(".svg") or b"<svg" in raw[:300]:
+                      import cairosvg
+                      raw = cairosvg.svg2png(bytestring=raw, output_width=512, output_height=512)
+                  im = Image.open(BytesIO(raw)).convert("RGBA")
+                  if im.width * im.height > best_area:
+                      best_area = im.width * im.height
+                      logo = im
+                  if im.width >= 192 and im.height >= 192:
+                      break
+              except Exception:
+                  continue
+
+          if logo is None:
+              logo = Image.new("RGBA", (512, 512), (30, 58, 138, 255))
+              draw = ImageDraw.Draw(logo)
+              m, w = 128, 56
+              draw.rectangle([m, m, m + w, 512 - m], fill=(255, 255, 255, 255))
+              draw.rectangle([512 - m - w, m, 512 - m, 512 - m], fill=(255, 255, 255, 255))
+              draw.rectangle([m, 256 - w // 2, 512 - m, 256 + w // 2], fill=(255, 255, 255, 255))
+
+          def make_square(im, sz):
+              canvas = Image.new("RGBA", (sz, sz), (255, 255, 255, 0))
+              ratio = min(sz / im.width, sz / im.height)
+              nw, nh = max(1, int(im.width * ratio)), max(1, int(im.height * ratio))
+              rs = im.resize((nw, nh), Image.Resampling.LANCZOS)
+              canvas.paste(rs, ((sz - nw) // 2, (sz - nh) // 2), rs)
+              return canvas
+
+          def make_round(sq):
+              sz = sq.width
+              mask = Image.new("L", (sz, sz), 0)
+              ImageDraw.Draw(mask).ellipse((0, 0, sz, sz), fill=255)
+              out = Image.new("RGBA", (sz, sz), (0, 0, 0, 0))
+              out.paste(sq, (0, 0), mask)
+              return out
+
+          for folder, px in MIPMAP_SIZES.items():
+              tdir = os.path.join("app/src/main/res", folder)
+              os.makedirs(tdir, exist_ok=True)
+              sq = make_square(logo, px)
+              rd = make_round(sq)
+              sq.save(os.path.join(tdir, "ic_launcher.png"), "PNG")
+              rd.save(os.path.join(tdir, "ic_launcher_round.png"), "PNG")
+
+          make_square(logo, 288).save("app/src/main/res/drawable-nodpi/site_logo.png", "PNG")
+          print("Hare Android project and icons generated successfully!")
+          PYEOF
+
+      - name: Android SDK Kurulumu
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle 8.7 Kurulumu
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: İmza Anahtarı (Keystore) Oluştur ve İmzalı APK Derle
+        run: |
+          keytool -genkeypair -v \
+            -keystore app/release-key.jks \
+            -alias hare_key \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass HareIlmiLutuf2026 \
+            -keypass HareIlmiLutuf2026 \
+            -dname "CN=hare.ilmilutuf.com.tr, OU=Mobile, O=Hare, L=Kayseri, ST=Kayseri, C=TR"
+          gradle assembleDebug assembleRelease --stacktrace
+
+      - name: İmzalı Hare Release APK Dosyasını Yükle (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hare-Release-Signed-APK
+          path: app/build/outputs/apk/release/app-release.apk
+
+      - name: Hare Debug APK Dosyasını Yükle (Artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hare-Debug-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
