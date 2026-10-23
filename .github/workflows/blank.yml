@@ -149,6 +149,7 @@ jobs:
 
           dependencies {
               implementation("androidx.core:core-ktx:1.13.1")
+              implementation("androidx.activity:activity-ktx:1.9.0")
               implementation("androidx.appcompat:appcompat:1.7.0")
               implementation("com.google.android.material:material:1.12.0")
               implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
@@ -160,8 +161,7 @@ jobs:
           with open("app/src/main/AndroidManifest.xml", "w", encoding="utf-8") as f:
               f.write("""<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-              xmlns:tools="http://schemas.android.com/tools"
-              package="tr.com.ilmilutuf.hare">
+              xmlns:tools="http://schemas.android.com/tools">
 
               <uses-permission android:name="android.permission.INTERNET" />
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -749,7 +749,7 @@ jobs:
                   onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
                       override fun handleOnBackPressed() {
                           when {
-                              customView != null -> webView.webChromeClient?.onHideCustomView()
+                              customView != null -> { fullScreenContainer.removeAllViews(); fullScreenContainer.visibility = View.GONE; swipeRefreshLayout.visibility = View.VISIBLE; customViewCallback?.onCustomViewHidden(); customView = null; customViewCallback = null }
                               webView.canGoBack() -> webView.goBack()
                               else -> {
                                   isEnabled = false
@@ -937,8 +937,13 @@ jobs:
           print("Hare Android project and icons generated successfully!")
           PYEOF
 
-      - name: Android SDK Kurulumu
-        uses: android-actions/setup-android@v3
+      - name: Android SDK Lisans ve Yol Yapılandırması
+        run: |
+          SDK_DIR="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "sdk.dir=$SDK_DIR" > local.properties
+          if [ -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          fi
 
       - name: Gradle 8.7 Kurulumu
         uses: gradle/actions/setup-gradle@v4
