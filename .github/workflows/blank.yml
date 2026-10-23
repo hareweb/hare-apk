@@ -39,6 +39,7 @@ jobs:
           # 1. Create directory structure
           os.makedirs("app/src/main/java/tr/com/ilmilutuf/hare", exist_ok=True)
           os.makedirs("app/src/main/res/drawable-nodpi", exist_ok=True)
+          os.makedirs("app/src/main/res/values", exist_ok=True)
 
           # 2. Write settings.gradle.kts
           with open("settings.gradle.kts", "w", encoding="utf-8") as f:
@@ -157,6 +158,20 @@ jobs:
           }
           """)
 
+          # 6.5 Write styles.xml to force green Status Bar & Theme
+          with open("app/src/main/res/values/styles.xml", "w", encoding="utf-8") as f:
+              f.write("""<?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="HareTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+                  <item name="colorPrimary">#059669</item>
+                  <item name="colorPrimaryVariant">#065F46</item>
+                  <item name="colorSecondary">#10B981</item>
+                  <item name="android:statusBarColor">#065F46</item>
+                  <item name="android:navigationBarColor">#065F46</item>
+              </style>
+          </resources>
+          """)
+
           # 7. Write app/src/main/AndroidManifest.xml (All Device Permissions + Hare Identity)
           with open("app/src/main/AndroidManifest.xml", "w", encoding="utf-8") as f:
               f.write("""<?xml version="1.0" encoding="utf-8"?>
@@ -200,7 +215,7 @@ jobs:
                   android:roundIcon="@mipmap/ic_launcher_round"
                   android:label="Hare"
                   android:supportsRtl="true"
-                  android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar"
+                  android:theme="@style/HareTheme"
                   android:usesCleartextTraffic="false">
 
                   <activity
@@ -337,6 +352,9 @@ jobs:
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
 
+                  window.statusBarColor = Color.parseColor("#065F46")
+                  window.navigationBarColor = Color.parseColor("#065F46")
+
                   createNotificationChannel()
                   requestAllDevicePermissions()
 
@@ -352,7 +370,7 @@ jobs:
                           ViewGroup.LayoutParams.MATCH_PARENT,
                           ViewGroup.LayoutParams.MATCH_PARENT
                       )
-                      setColorSchemeColors(Color.parseColor("#1E3A8A"), Color.parseColor("#0D9488"))
+                      setColorSchemeColors(Color.parseColor("#059669"), Color.parseColor("#10B981"))
                   }
 
                   webView = WebView(this).apply {
@@ -652,7 +670,7 @@ jobs:
                   return LinearLayout(this).apply {
                       orientation = LinearLayout.VERTICAL
                       gravity = Gravity.CENTER
-                      setBackgroundColor(Color.parseColor("#0F172A"))
+                      setBackgroundColor(Color.parseColor("#064E3B"))
                       layoutParams = FrameLayout.LayoutParams(
                           ViewGroup.LayoutParams.MATCH_PARENT,
                           ViewGroup.LayoutParams.MATCH_PARENT
@@ -719,7 +737,7 @@ jobs:
 
                       val retryButton = Button(this@MainActivity).apply {
                           text = "Tekrar Dene"
-                          setBackgroundColor(Color.parseColor("#1E3A8A"))
+                          setBackgroundColor(Color.parseColor("#059669"))
                           setTextColor(Color.WHITE)
                           setOnClickListener {
                               if (isNetworkAvailable()) {
@@ -845,7 +863,7 @@ jobs:
           }
           """)
 
-          # 9. Fetch official logo from https://hare.ilmilutuf.com.tr and create mipmap icons
+          # 9. Fetch official logo from repo or https://hare.ilmilutuf.com.tr and create mipmap icons
           SITE_URL = "https://hare.ilmilutuf.com.tr"
           HEADERS = {"User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126.0.0.0 Mobile Safari/537.36"}
           MIPMAP_SIZES = {
@@ -856,53 +874,72 @@ jobs:
               "mipmap-xxxhdpi": 192,
           }
 
-          candidates = []
-          try:
-              resp = requests.get(SITE_URL, headers=HEADERS, timeout=15)
-              if resp.status_code == 200:
-                  soup = BeautifulSoup(resp.text, "html.parser")
-                  for link in soup.find_all("link"):
-                      rel = " ".join(link.get("rel", [])).lower()
-                      href = link.get("href")
-                      if href and any(k in rel for k in ["apple-touch-icon", "icon", "shortcut"]):
-                          candidates.append(urljoin(SITE_URL, href))
-                  for img in soup.find_all("img"):
-                      src = img.get("src") or img.get("data-src")
-                      alt = (img.get("alt") or "").lower()
-                      cls = " ".join(img.get("class", [])).lower()
-                      if src and any(k in src.lower() or k in alt or k in cls for k in ["logo", "hare", "brand", "icon"]):
-                          candidates.append(urljoin(SITE_URL, src))
-                  og_img = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "og:image"})
-                  if og_img and og_img.get("content"):
-                      candidates.append(urljoin(SITE_URL, og_img["content"]))
-          except Exception as e:
-              print("Site scan warning:", e)
-
-          for p in ["/apple-touch-icon.png", "/logo.png", "/assets/logo.png", "/img/logo.png", "/images/logo.png", "/favicon.png", "/favicon.ico"]:
-              candidates.append(urljoin(SITE_URL, p))
-
           logo = None
           best_area = 0
-          for url in candidates:
+
+          # Önce depoda mevcut bir logo varsa onu kontrol et (üzerine yazılmasını önler)
+          local_candidates = [
+              "logo.png", "icon.png", "assets/logo.png", "public/logo.png",
+              "app/src/main/res/drawable-nodpi/site_logo.png",
+              "app/src/main/res/mipmap-xxxhdpi/ic_launcher.png"
+          ]
+          for lp in local_candidates:
+              if os.path.exists(lp):
+                  try:
+                      im = Image.open(lp).convert("RGBA")
+                      if im.width * im.height > best_area:
+                          best_area = im.width * im.height
+                          logo = im
+                  except Exception:
+                      pass
+
+          candidates = []
+          if logo is None:
               try:
-                  r = requests.get(url, headers=HEADERS, timeout=10)
-                  if r.status_code != 200 or not r.content:
+                  resp = requests.get(SITE_URL, headers=HEADERS, timeout=15)
+                  if resp.status_code == 200:
+                      soup = BeautifulSoup(resp.text, "html.parser")
+                      for link in soup.find_all("link"):
+                          rel = " ".join(link.get("rel", [])).lower()
+                          href = link.get("href")
+                          if href and any(k in rel for k in ["apple-touch-icon", "icon", "shortcut"]):
+                              candidates.append(urljoin(SITE_URL, href))
+                      for img in soup.find_all("img"):
+                          src = img.get("src") or img.get("data-src")
+                          alt = (img.get("alt") or "").lower()
+                          cls = " ".join(img.get("class", [])).lower()
+                          if src and any(k in src.lower() or k in alt or k in cls for k in ["logo", "hare", "brand", "icon"]):
+                              candidates.append(urljoin(SITE_URL, src))
+                      og_img = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "og:image"})
+                      if og_img and og_img.get("content"):
+                          candidates.append(urljoin(SITE_URL, og_img["content"]))
+              except Exception as e:
+                  print("Site scan warning:", e)
+
+              for p in ["/apple-touch-icon.png", "/logo.png", "/assets/logo.png", "/img/logo.png", "/images/logo.png", "/favicon.png", "/favicon.ico"]:
+                  candidates.append(urljoin(SITE_URL, p))
+
+              for url in candidates:
+                  try:
+                      r = requests.get(url, headers=HEADERS, timeout=10)
+                      if r.status_code != 200 or not r.content:
+                          continue
+                      raw = r.content
+                      if url.lower().endswith(".svg") or b"<svg" in raw[:300]:
+                          import cairosvg
+                          raw = cairosvg.svg2png(bytestring=raw, output_width=512, output_height=512)
+                      im = Image.open(BytesIO(raw)).convert("RGBA")
+                      if im.width * im.height > best_area:
+                          best_area = im.width * im.height
+                          logo = im
+                      if im.width >= 192 and im.height >= 192:
+                          break
+                  except Exception:
                       continue
-                  raw = r.content
-                  if url.lower().endswith(".svg") or b"<svg" in raw[:300]:
-                      import cairosvg
-                      raw = cairosvg.svg2png(bytestring=raw, output_width=512, output_height=512)
-                  im = Image.open(BytesIO(raw)).convert("RGBA")
-                  if im.width * im.height > best_area:
-                      best_area = im.width * im.height
-                      logo = im
-                  if im.width >= 192 and im.height >= 192:
-                      break
-              except Exception:
-                  continue
 
           if logo is None:
-              logo = Image.new("RGBA", (512, 512), (30, 58, 138, 255))
+              # Yeşil Hare Yedek Logosu (#059669 -> RGB: 5, 150, 105)
+              logo = Image.new("RGBA", (512, 512), (5, 150, 105, 255))
               draw = ImageDraw.Draw(logo)
               m, w = 128, 56
               draw.rectangle([m, m, m + w, 512 - m], fill=(255, 255, 255, 255))
