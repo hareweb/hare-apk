@@ -946,7 +946,7 @@ jobs:
           fi
 
       - name: Gradle 8.7 Kurulumu
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: '8.7'
 
@@ -964,13 +964,13 @@ jobs:
           gradle assembleDebug assembleRelease --stacktrace
 
       - name: İmzalı Hare Release APK Dosyasını Yükle (Artifact)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Hare-Release-Signed-APK
           path: app/build/outputs/apk/release/app-release.apk
 
       - name: Hare Debug APK Dosyasını Yükle (Artifact)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Hare-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
