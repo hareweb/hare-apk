@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Depoyu Çek (Checkout)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: JDK 17 Kurulumu
         uses: actions/setup-java@v5
