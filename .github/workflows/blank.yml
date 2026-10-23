@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: JDK 17 Kurulumu
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -157,7 +157,7 @@ jobs:
           }
           """)
 
-          # 7. Write app/src/main/AndroidManifest.xml (All Device Permissions + Hare Identity)
+          # 7. Write app/src/main/AndroidManifest.xml
           with open("app/src/main/AndroidManifest.xml", "w", encoding="utf-8") as f:
               f.write("""<?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
